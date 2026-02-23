@@ -171,6 +171,23 @@
       font-size: 0.95rem;
       padding: 32px 0;
     }
+
+    .loading {
+      text-align: center;
+      color: #a0aec0;
+      font-size: 0.95rem;
+      padding: 32px 0;
+    }
+
+    .error-msg {
+      background: #fff5f5;
+      color: #e53e3e;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.9rem;
+      margin-bottom: 12px;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -182,27 +199,41 @@
       <button onclick="addItem()">추가</button>
     </div>
 
+    <div class="error-msg" id="errorMsg"></div>
+
     <div class="stats">
       <span id="statsText">항목 없음</span>
       <button class="clear-done" onclick="clearDone()">완료 항목 삭제</button>
     </div>
 
     <ul id="list"></ul>
-    <p class="empty" id="emptyMsg">리스트가 비어 있습니다.</p>
+    <p class="loading" id="loadingMsg">불러오는 중...</p>
+    <p class="empty" id="emptyMsg" style="display:none">리스트가 비어 있습니다.</p>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
-    let items = JSON.parse(localStorage.getItem('shoppingList') || '[]');
+    const SUPABASE_URL = 'https://gwxcosoilnxwlhfcshhr.supabase.co';
+    const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imd3eGNvc29pbG54d2xoZmNzaGhyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NDcxMDcsImV4cCI6MjA4NzQyMzEwN30.FQCm8tmbBZ06J6NNumCW7GuioeNfJSh3UkQsFt6p4Os';
 
-    function save() {
-      localStorage.setItem('shoppingList', JSON.stringify(items));
+    const { createClient } = supabase;
+    const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    let items = [];
+
+    function showError(msg) {
+      const el = document.getElementById('errorMsg');
+      el.textContent = msg;
+      el.style.display = msg ? 'block' : 'none';
     }
 
     function render() {
       const list = document.getElementById('list');
       const emptyMsg = document.getElementById('emptyMsg');
+      const loadingMsg = document.getElementById('loadingMsg');
       const statsText = document.getElementById('statsText');
 
+      loadingMsg.style.display = 'none';
       list.innerHTML = '';
 
       if (items.length === 0) {
@@ -216,14 +247,14 @@
       const doneCount = items.filter(i => i.done).length;
       statsText.textContent = `전체 ${items.length}개 · 완료 ${doneCount}개`;
 
-      items.forEach((item, index) => {
+      items.forEach((item) => {
         const li = document.createElement('li');
         if (item.done) li.classList.add('done');
 
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
         checkbox.checked = item.done;
-        checkbox.addEventListener('change', () => toggleItem(index));
+        checkbox.addEventListener('change', () => toggleItem(item.id, !item.done));
 
         const span = document.createElement('span');
         span.className = 'item-text';
@@ -233,7 +264,7 @@
         delBtn.className = 'delete-btn';
         delBtn.textContent = '✕';
         delBtn.title = '삭제';
-        delBtn.addEventListener('click', () => deleteItem(index));
+        delBtn.addEventListener('click', () => deleteItem(item.id));
 
         li.appendChild(checkbox);
         li.appendChild(span);
@@ -242,33 +273,95 @@
       });
     }
 
-    function addItem() {
+    async function loadItems() {
+      showError('');
+      const { data, error } = await db
+        .from('shopping_items')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) {
+        showError('데이터를 불러오지 못했습니다: ' + error.message);
+        document.getElementById('loadingMsg').style.display = 'none';
+        return;
+      }
+
+      items = data;
+      render();
+    }
+
+    async function addItem() {
       const input = document.getElementById('itemInput');
       const text = input.value.trim();
       if (!text) return;
 
-      items.push({ text, done: false });
-      save();
+      showError('');
+      const { data, error } = await db
+        .from('shopping_items')
+        .insert({ text, done: false })
+        .select()
+        .single();
+
+      if (error) {
+        showError('추가 실패: ' + error.message);
+        return;
+      }
+
+      items.push(data);
       render();
       input.value = '';
       input.focus();
     }
 
-    function toggleItem(index) {
-      items[index].done = !items[index].done;
-      save();
+    async function toggleItem(id, done) {
+      showError('');
+      const { error } = await db
+        .from('shopping_items')
+        .update({ done })
+        .eq('id', id);
+
+      if (error) {
+        showError('수정 실패: ' + error.message);
+        return;
+      }
+
+      const item = items.find(i => i.id === id);
+      if (item) item.done = done;
       render();
     }
 
-    function deleteItem(index) {
-      items.splice(index, 1);
-      save();
+    async function deleteItem(id) {
+      showError('');
+      const { error } = await db
+        .from('shopping_items')
+        .delete()
+        .eq('id', id);
+
+      if (error) {
+        showError('삭제 실패: ' + error.message);
+        return;
+      }
+
+      items = items.filter(i => i.id !== id);
       render();
     }
 
-    function clearDone() {
+    async function clearDone() {
+      showError('');
+      const doneIds = items.filter(i => i.done).map(i => i.id);
+      if (doneIds.length === 0) return;
+
+      const { error } = await db
+        .from('shopping_items')
+        .delete()
+        .in('id', doneIds);
+
+      if (error) {
+        showError('삭제 실패: ' + error.message);
+        return;
+      }
+
       items = items.filter(i => !i.done);
-      save();
       render();
     }
 
@@ -276,7 +369,7 @@
       if (e.key === 'Enter') addItem();
     });
 
-    render();
+    loadItems();
   </script>
 </body>
 </html>
