@@ -1,0 +1,19 @@
+# Claude Code
+CLAUDE.md
+.claude/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Playwright MCP
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
